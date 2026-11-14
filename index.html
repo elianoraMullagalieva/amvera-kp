@@ -178,8 +178,8 @@ b{font-weight:600}
 .s-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;padding:.8rem}
 .s-cards div{background:var(--paper);border-radius:.6rem;padding:.6rem .7rem;display:flex;flex-direction:column;font-size:.7rem;color:var(--mute)}
 .s-cards b{color:var(--ink);font-size:.85rem}
-.crm{position:absolute;inset:0;background:var(--white);padding:1.1rem;opacity:0;pointer-events:none;transition:opacity .4s;overflow:auto}
-.crm.on{opacity:1;pointer-events:auto}
+.crm{position:absolute;inset:0;background:var(--white);padding:1.1rem;opacity:0;pointer-events:none;transition:opacity .4s;overflow:hidden}
+.crm.on{opacity:1;pointer-events:auto;overflow:auto}
 .crm-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.8rem;font-size:var(--t-small)}
 .crm-h span{color:var(--mute)}
 .crm table{width:100%;border-collapse:collapse;font-size:clamp(.72rem,.68rem + .15vw,.85rem)}
@@ -197,7 +197,7 @@ tr.new .st{background:var(--ink);color:#fff}
 @media (min-width:900px){.app-body{grid-template-columns:minmax(0,.85fr) minmax(0,1.4fr)}.chat{border-bottom:0;border-right:1px solid var(--soft)}}
 
 /* --- Идея 02: 3D-лента проектов --- */
-.tun{height:260vh;position:relative;background:#000;color:#fff}
+.tun{height:260vh;position:relative;background:#000;color:#fff;overflow:clip}
 .tun-stick{position:sticky;top:0;height:100vh;height:100svh;overflow:hidden;isolation:isolate}
 .tun-scene{position:absolute;inset:0;overflow:hidden;z-index:1}
 .tun-world{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d}
@@ -249,7 +249,7 @@ tr.new .st{background:var(--ink);color:#fff}
 
 /* --- Идея 05: путь клиента --- */
 .path{list-style:none;margin:1.25rem 0 0;padding:0;display:grid;gap:.5rem;counter-reset:p}
-.path li{counter-increment:p;display:grid;grid-template-columns:2.4rem 1fr;align-items:center;gap:.75rem;background:var(--d2);border-radius:.9rem;padding:.8rem 1rem;font-size:var(--t-small);animation:in .4s both}
+.path li{counter-increment:p;display:grid;grid-template-columns:2.4rem 1fr;align-items:center;gap:.75rem;background:var(--d2);border-radius:.9rem;padding:.8rem 1rem;font-size:var(--t-small);animation:in .4s backwards}
 .path li::before{content:counter(p);font-variant-numeric:tabular-nums;color:var(--mute-d)}
 .path.good li{background:#fff;color:var(--ink);font-size:var(--t-body);padding:1.15rem 1.2rem;font-weight:500}
 .path.good li::before{color:var(--mute)}
@@ -270,7 +270,7 @@ tr.new .st{background:var(--ink);color:#fff}
 .ph-head b{display:block;font-size:.9rem;letter-spacing:-.01em}
 .ph-head small{font-size:.75rem;color:var(--mute)}
 .ph-feed{flex:1;background:#EEEDEA;padding:.8rem;display:flex;flex-direction:column;justify-content:flex-end;gap:.6rem;overflow:hidden}
-.post{background:#fff;border-radius:1rem 1rem 1rem .3rem;overflow:hidden;font-size:.8rem;line-height:1.45;max-width:94%;animation:in .4s both}
+.post{background:#fff;border-radius:1rem 1rem 1rem .3rem;overflow:hidden;font-size:.8rem;line-height:1.45;max-width:94%;animation:in .4s backwards}
 .post p{padding:.7rem .85rem}
 .post p small{display:block;color:var(--mute);font-size:.7rem;margin-top:.3rem;text-align:right}
 .post .rub{display:inline-block;font-size:.68rem;font-weight:600;background:var(--paper);border-radius:999px;padding:.15em .6em;margin-bottom:.35rem}
@@ -353,7 +353,7 @@ tr.new .st{background:var(--ink);color:#fff}
 /* ===== Лёгкое появление при прокрутке ===== */
 .anim .rv{opacity:0;transform:translateY(28px);transition:opacity .9s cubic-bezier(.2,.7,.2,1) var(--d,0s),transform .9s cubic-bezier(.2,.7,.2,1) var(--d,0s)}
 .anim .rv.in{opacity:1;transform:none}
-.anim .cover .h-giant > *, .anim .cover .h-giant{animation:rise 1.1s cubic-bezier(.2,.7,.2,1) both}
+.anim .cover .h-giant > *, .anim .cover .h-giant{animation:rise 1.1s cubic-bezier(.2,.7,.2,1) backwards}
 .anim .cover .l2{animation-delay:.12s}.anim .cover .l3{animation-delay:.24s}
 @keyframes rise{from{opacity:0;transform:translateY(.25em)}}
 .stat,.box,.opt,.step{transition:transform .5s cubic-bezier(.2,.7,.2,1)}
@@ -722,6 +722,13 @@ tr.new .st{background:var(--ink);color:#fff}
   function fmt(n) { return Math.round(n).toLocaleString('ru-RU').replace(/\s/g, ' '); }
   function press(group, btn) { group.forEach(function (x) { x.setAttribute('aria-pressed', x === btn ? 'true' : 'false'); }); }
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  // Анимации, которых не видно, ставим на паузу: меньше работы при прокрутке
+  var vis = new WeakMap();
+  var visIo = 'IntersectionObserver' in window ? new IntersectionObserver(function (en) {
+    en.forEach(function (e) { var s = vis.get(e.target); s.on = e.isIntersecting; if (s.on) { s.q.splice(0).forEach(function (f) { f(); }); } });
+  }) : null;
+  function watch(el) { if (!vis.has(el)) { vis.set(el, { on: true, q: [] }); if (visIo) visIo.observe(el); } return vis.get(el); }
+  function onScreen(el) { var s = watch(el); return s.on ? Promise.resolve() : new Promise(function (r) { s.q.push(r); }); }
 
   /* ===== Обложка: поле запроса в заголовке ===== */
   var insPrompts = ['сайт для студии маникюра', 'бот записи к психологу', 'меню кофейни с заказом', 'CRM для заявок'];
@@ -731,6 +738,7 @@ tr.new .st{background:var(--ink);color:#fff}
     (async function loop() {
       for (var i = 0; ; i = (i + 1) % insPrompts.length) {
         var s = insPrompts[i];
+        await onScreen(insT);
         for (var k = 1; k <= s.length; k++) { insT.textContent = s.slice(0, k); await wait(55); }
         await wait(1600);
         for (var j = s.length; j >= 0; j--) { insT.textContent = s.slice(0, j); await wait(22); }
@@ -757,7 +765,7 @@ tr.new .st{background:var(--ink);color:#fff}
   aBiz.addEventListener('click', function () { audManual = true; setAud('biz', true); });
   aDev.addEventListener('click', function () { audManual = true; setAud('dev', true); });
   setAud('biz', false);
-  if (!still) setInterval(function () { if (!audManual) setAud(audCur === 'biz' ? 'dev' : 'biz', true); }, 4200);
+  if (!still) setInterval(function () { if (!audManual && watch(aBox).on) setAud(audCur === 'biz' ? 'dev' : 'biz', true); }, 4200);
 
   /* ===== Идея 01: демо «запрос → сайт → заявка» ===== */
   var personas = [
@@ -833,7 +841,14 @@ tr.new .st{background:var(--ink);color:#fff}
     crmRows(p, true);
   }
   // Пауза, которая прерывается, если пользователь переключил нишу
-  function sleep(ms, id) { return new Promise(function (res, rej) { setTimeout(function () { id === run ? res() : rej('stop'); }, ms); }); }
+  function sleep(ms, id) {
+    return new Promise(function (res, rej) {
+      setTimeout(function () {
+        if (id !== run) { rej('stop'); return; }
+        onScreen($('app')).then(function () { id === run ? res() : rej('stop'); });
+      }, ms);
+    });
+  }
   async function sequence(i, id) {
     var p = personas[i];
     reset(p);
@@ -904,7 +919,7 @@ tr.new .st{background:var(--ink);color:#fff}
   siteWorks = siteWorks.concat(WORKS.filter(function (w) { return w.crm; }));
   var bannerWorks = WORKS.filter(function (w) { return w.ratio < 1.05; });
 
-  var TW = 12, TH = 7.2, SEG = 4.2, COUNT = 17, COLS = 4, ROWS = 4, U = 100; // U — пикселей в единице сцены
+  var TW = 12, TH = 7.2, SEG = 4.2, COUNT = 8, COLS = 4, ROWS = 4, U = 100; // U — пикселей в единице сцены
   var hw = TW / 2, hh = TH / 2, cw = TW / COLS, ch = TH / ROWS;
   var tun = $('tun'), scene = $('tun-scene'), world = $('tun-world'), segs = [];
 
@@ -953,19 +968,25 @@ tr.new .st{background:var(--ink);color:#fff}
     seg.className = 'tseg';
     fill(seg, si);
     world.appendChild(seg);
-    segs.push({ el: seg, z: -si * SEG });
+    segs.push({ el: seg, z: -si * SEG, slabs: Array.prototype.slice.call(seg.children), on: true, o: -1 });
   }
 
-  var persp = 800, camZ = 0, drift = 0, travel = 0, speed = .45, prev = 0, running = false, progress = 0, lastY = window.scrollY;
+  var persp = 800, camZ = 0, drift = 0, travel = 0, speed = .45, prev = 0, running = false, near = false, progress = 0, lastY = window.scrollY;
+  var NEAR = 4.6, FADE0 = 15, FADE1 = 20.5, tunTop = 0, tunTotal = 1, lastW = 0, lastH = 0;
   function tunResize() {
     var w = scene.clientWidth, h = scene.clientHeight;
+    tunTop = tun.getBoundingClientRect().top + window.scrollY;
+    tunTotal = Math.max(1, tun.offsetHeight - window.innerHeight);
+    if (w === lastW && h === lastH) return; // на телефоне resize летит при каждом показе адресной строки
+    lastW = w; lastH = h;
     var fov = w < 768 ? 72 : 55; // на телефоне угол шире, иначе стены уходят за край
+    // Сегменты у самой камеры не видны в кадре, но раздуваются до огромных слоёв — прячем их
+    NEAR = w < 768 ? 3.2 : 4.6;
     persp = (h / 2) / Math.tan(fov * Math.PI / 360);
     scene.style.perspective = persp + 'px';
   }
   function tunProgress() {
-    var r = tun.getBoundingClientRect(), total = tun.offsetHeight - window.innerHeight;
-    progress = Math.min(1, Math.max(0, -r.top / total));
+    progress = Math.min(1, Math.max(0, (window.scrollY - tunTop) / tunTotal));
   }
   function render() {
     world.style.transform = 'translateZ(' + (persp - camZ * U) + 'px)';
@@ -975,10 +996,13 @@ tr.new .st{background:var(--ink);color:#fff}
       // Коридор бесконечный: ушедший за спину сегмент переезжает в хвост и обратно
       if (s.z > camZ + SEG) { tail -= SEG; s.z = tail; }
       else if (s.z < camZ - COUNT * SEG) { head += SEG; s.z = head; }
-      var dist = camZ - s.z;
-      // дальние сегменты проявляются из темноты, чтобы не было «выскакивания»
-      var o = dist < 20 ? 1 : Math.max(0, 1 - (dist - 20) / 34);
-      s.el.style.opacity = o.toFixed(3);
+      var dist = camZ - s.z, show = dist > NEAR && dist < FADE1;
+      if (show !== s.on) { s.on = show; s.el.hidden = !show; }
+      if (!show) return;
+      // дальние работы проявляются из темноты; прозрачность — на самих карточках,
+      // у 3D-группы она ломает перспективу и заставляет перерисовывать слой
+      var o = dist < FADE0 ? 1 : Math.round((1 - (dist - FADE0) / (FADE1 - FADE0)) * 25) / 25;
+      if (o !== s.o) { s.o = o; s.slabs.forEach(function (el) { el.style.opacity = o === 1 ? '' : o; }); }
       s.el.style.transform = 'translateZ(' + (s.z * U) + 'px)';
     });
   }
@@ -994,12 +1018,21 @@ tr.new .st{background:var(--ink);color:#fff}
     render();
   }
   tunResize(); render();
-  window.addEventListener('resize', function () { tunResize(); render(); });
+  window.addEventListener('resize', function () { tunResize(); if (near) render(); });
+  window.addEventListener('load', tunResize);
   window.addEventListener('scroll', function () {
     var dy = window.scrollY - lastY; lastY = window.scrollY;
+    if (!near) return;
     tunProgress();
     if (dy > 0 && running) speed = Math.min(window.innerWidth > 900 ? 6.5 : 3.2, speed + dy * (window.innerWidth > 900 ? .09 : .028));
   }, { passive: true });
+  // Пока туннель далеко от экрана, его просто нет: ни слоёв, ни текстур
+  world.style.display = 'none';
+  new IntersectionObserver(function (en) {
+    near = en[0].isIntersecting;
+    world.style.display = near ? '' : 'none';
+    if (near) { tunResize(); tunProgress(); render(); }
+  }, { rootMargin: '60% 0px 60% 0px' }).observe(tun);
   new IntersectionObserver(function (en) { running = en[0].isIntersecting && !still; }, { threshold: 0 }).observe(tun);
   requestAnimationFrame(tick);
 
