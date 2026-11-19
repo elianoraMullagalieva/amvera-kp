@@ -30,7 +30,7 @@
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:var(--t-body);line-height:1.55;font-optical-sizing:auto;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:var(--t-body);line-height:1.55;font-optical-sizing:auto;-webkit-font-smoothing:antialiased;overflow-x:hidden;overflow-x:clip}
 h1,h2,h3,h4,p{margin:0}
 button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
 b{font-weight:600}
@@ -204,6 +204,7 @@ tr.new .st{background:var(--ink);color:#fff}
 .tseg{position:absolute;left:0;top:0;transform-style:preserve-3d}
 .tslab{position:absolute;left:0;top:0;display:block;backface-visibility:hidden;object-fit:fill;background:#111}
 .tslab.acc{background:#8f1d1a}
+.tun-gl{position:absolute;inset:0;width:100%;height:100%;display:block}
 /* затемнение сверху и снизу, как на сайте практикума */
 .tun-scene::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,#000 0%,rgba(0,0,0,0) 16%,rgba(0,0,0,0) 84%,#000 100%)}
 .tun-c{position:absolute;inset:0;z-index:5;display:grid;place-items:center;text-align:center;pointer-events:none}
@@ -938,15 +939,19 @@ tr.new .st{background:var(--ink);color:#fff}
     }
     return list;
   }
+  // На опубликованной странице туннель рисуется в WebGL: один холст, текстуры грузятся один раз,
+  // никаких 3D-слоёв в DOM — на телефоне не тормозит. С file:// WebGL картинки не берёт, там CSS 3D.
+  var gl = location.protocol === 'file:' ? null : makeGL();
   function slab(seg, sl, work) {
     var size = work ? fit(sl.w * .9, sl.h * .9, work.ratio) : { w: sl.w * .9, h: sl.h * .9 };
+    if (gl) { seg.list.push({ sl: sl, work: work, w: size.w, h: size.h }); return; }
     var el = work ? new Image() : document.createElement('i');
     if (work) { el.src = work.src; el.alt = ''; el.decoding = 'async'; el.draggable = false; } else el.className = 'acc';
     el.classList.add('tslab');
     var W = size.w * U, H = size.h * U;
     el.style.width = W + 'px'; el.style.height = H + 'px';
     el.style.transform = 'translate3d(' + (sl.x * U - W / 2) + 'px,' + (sl.y * U - H / 2) + 'px,' + (sl.z * U) + 'px) ' + sl.rot;
-    seg.appendChild(el);
+    seg.el.appendChild(el);
   }
   // Тот же ритм, что на сайте: крайние ряды — шахматка вертикальных работ,
   // в остальных ячейках работы примерно в каждой третьей, иногда бордовая плоскость
@@ -964,51 +969,159 @@ tr.new .st{background:var(--ink);color:#fff}
     });
   }
   for (var si = 0; si < COUNT; si++) {
-    var seg = document.createElement('div');
-    seg.className = 'tseg';
+    var seg = { el: gl ? null : document.createElement('div'), list: [], z: -si * SEG, on: true, o: -1 };
+    if (seg.el) { seg.el.className = 'tseg'; world.appendChild(seg.el); }
     fill(seg, si);
-    world.appendChild(seg);
-    segs.push({ el: seg, z: -si * SEG, slabs: Array.prototype.slice.call(seg.children), on: true, o: -1 });
+    seg.slabs = seg.el ? Array.prototype.slice.call(seg.el.children) : [];
+    segs.push(seg);
   }
+  if (gl) { world.remove(); gl.build(segs); }
 
   var persp = 800, camZ = 0, drift = 0, travel = 0, speed = .45, prev = 0, running = false, near = false, progress = 0, lastY = window.scrollY;
-  var NEAR = 4.6, FADE0 = 15, FADE1 = 20.5, tunTop = 0, tunTotal = 1, lastW = 0, lastH = 0;
+  var NEAR = 4.6, FADE0 = 15, FADE1 = 20.5, tunTop = 0, tunTotal = 1, lastW = 0, lastH = 0, fov = 55;
   function tunResize() {
     var w = scene.clientWidth, h = scene.clientHeight;
     tunTop = tun.getBoundingClientRect().top + window.scrollY;
     tunTotal = Math.max(1, tun.offsetHeight - window.innerHeight);
     if (w === lastW && h === lastH) return; // на телефоне resize летит при каждом показе адресной строки
     lastW = w; lastH = h;
-    var fov = w < 768 ? 72 : 55; // на телефоне угол шире, иначе стены уходят за край
-    // Сегменты у самой камеры не видны в кадре, но раздуваются до огромных слоёв — прячем их
+    fov = w < 768 ? 72 : 55; // на телефоне угол шире, иначе стены уходят за край
+    // Сегменты у самой камеры не видны в кадре, но в CSS раздуваются до огромных слоёв — прячем их
     NEAR = w < 768 ? 3.2 : 4.6;
     persp = (h / 2) / Math.tan(fov * Math.PI / 360);
-    scene.style.perspective = persp + 'px';
+    if (gl) gl.size(w, h, fov); else scene.style.perspective = persp + 'px';
   }
   function tunProgress() {
     progress = Math.min(1, Math.max(0, (window.scrollY - tunTop) / tunTotal));
   }
+  function fade(dist) { return dist < FADE0 ? 1 : Math.max(0, Math.round((1 - (dist - FADE0) / (FADE1 - FADE0)) * 25) / 25); }
   function render() {
-    world.style.transform = 'translateZ(' + (persp - camZ * U) + 'px)';
     var zs = segs.map(function (s) { return s.z; });
     var tail = Math.min.apply(null, zs), head = Math.max.apply(null, zs);
     segs.forEach(function (s) {
       // Коридор бесконечный: ушедший за спину сегмент переезжает в хвост и обратно
       if (s.z > camZ + SEG) { tail -= SEG; s.z = tail; }
       else if (s.z < camZ - COUNT * SEG) { head += SEG; s.z = head; }
+    });
+    if (gl) { gl.draw(segs, camZ, fade, FADE1); return; }
+    world.style.transform = 'translateZ(' + (persp - camZ * U) + 'px)';
+    segs.forEach(function (s) {
       var dist = camZ - s.z, show = dist > NEAR && dist < FADE1;
       if (show !== s.on) { s.on = show; s.el.hidden = !show; }
       if (!show) return;
-      // дальние работы проявляются из темноты; прозрачность — на самих карточках,
-      // у 3D-группы она ломает перспективу и заставляет перерисовывать слой
-      var o = dist < FADE0 ? 1 : Math.round((1 - (dist - FADE0) / (FADE1 - FADE0)) * 25) / 25;
+      // прозрачность — на самих карточках: у 3D-группы она ломает перспективу
+      var o = fade(dist);
       if (o !== s.o) { s.o = o; s.slabs.forEach(function (el) { el.style.opacity = o === 1 ? '' : o; }); }
       s.el.style.transform = 'translateZ(' + (s.z * U) + 'px)';
     });
   }
+
+  function makeGL() {
+    var cv = document.createElement('canvas'), c, opts = { alpha: false, antialias: true, powerPreference: 'high-performance' };
+    try { c = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts); } catch (e) { c = null; }
+    if (!c) return null;
+    cv.className = 'tun-gl'; cv.setAttribute('aria-hidden', 'true');
+    scene.insertBefore(cv, scene.firstChild);
+    var VS = 'attribute vec3 p;attribute vec2 t;uniform mat4 P;uniform float cz,sz;varying vec2 v;' +
+      'void main(){v=t;gl_Position=P*vec4(p.x,-p.y,p.z+sz-cz,1.);}';
+    var FS = 'precision mediump float;uniform sampler2D tx;uniform vec3 col;uniform float a,use;varying vec2 v;' +
+      'void main(){vec3 c=use>.5?texture2D(tx,v).rgb:col;gl_FragColor=vec4(c*a,1.);}'; // фон чёрный: «прозрачность» = затемнение
+    var prog, loc = {}, buf, tex = [], ready = [], aniso, items = [], P = new Float32Array(16), W = 1, H = 1, F = 55, lost = false;
+    var srcs = WORKS.map(function (w) { return w.src; }), imgs = [];
+    function sh(type, src) { var s = c.createShader(type); c.shaderSource(s, src); c.compileShader(s); return s; }
+    function pot(n) { var p = 1; while (p < n && p < 1024) p *= 2; return p; }
+    function upload(i) {
+      var im = imgs[i]; if (!im || !im.complete || !im.naturalWidth || lost) return;
+      // WebGL1 строит мипмапы только для степеней двойки — дорисовываем в такой холст
+      var k = document.createElement('canvas'); k.width = pot(im.naturalWidth); k.height = pot(im.naturalHeight);
+      k.getContext('2d').drawImage(im, 0, 0, k.width, k.height);
+      var t = c.createTexture(); c.bindTexture(c.TEXTURE_2D, t);
+      c.texImage2D(c.TEXTURE_2D, 0, c.RGB, c.RGB, c.UNSIGNED_BYTE, k);
+      c.generateMipmap(c.TEXTURE_2D);
+      c.texParameteri(c.TEXTURE_2D, c.TEXTURE_MIN_FILTER, c.LINEAR_MIPMAP_LINEAR);
+      c.texParameteri(c.TEXTURE_2D, c.TEXTURE_MAG_FILTER, c.LINEAR);
+      c.texParameteri(c.TEXTURE_2D, c.TEXTURE_WRAP_S, c.CLAMP_TO_EDGE);
+      c.texParameteri(c.TEXTURE_2D, c.TEXTURE_WRAP_T, c.CLAMP_TO_EDGE);
+      if (aniso) c.texParameterf(c.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, c.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+      tex[i] = t; ready[i] = true;
+      if (near) render();
+    }
+    function init() {
+      prog = c.createProgram();
+      c.attachShader(prog, sh(c.VERTEX_SHADER, VS)); c.attachShader(prog, sh(c.FRAGMENT_SHADER, FS));
+      c.linkProgram(prog); c.useProgram(prog);
+      ['P', 'cz', 'sz', 'tx', 'col', 'a', 'use'].forEach(function (n) { loc[n] = c.getUniformLocation(prog, n); });
+      loc.p = c.getAttribLocation(prog, 'p'); loc.t = c.getAttribLocation(prog, 't');
+      aniso = c.getExtension('EXT_texture_filter_anisotropic') || c.getExtension('WEBKIT_EXT_texture_filter_anisotropic');
+      c.enable(c.DEPTH_TEST); c.clearColor(0, 0, 0, 1);
+      c.uniform1i(loc.tx, 0);
+      tex = []; ready = [];
+      if (verts) upBuf();
+      imgs.forEach(function (im, i) { upload(i); });
+    }
+    var verts = null;
+    function upBuf() {
+      buf = c.createBuffer(); c.bindBuffer(c.ARRAY_BUFFER, buf);
+      c.bufferData(c.ARRAY_BUFFER, verts, c.STATIC_DRAW);
+      c.enableVertexAttribArray(loc.p); c.vertexAttribPointer(loc.p, 3, c.FLOAT, false, 20, 0);
+      c.enableVertexAttribArray(loc.t); c.vertexAttribPointer(loc.t, 2, c.FLOAT, false, 20, 12);
+    }
+    // Те же повороты, что у CSS-версии: пол rotateX(90), потолок rotateX(-90), стены rotateY(±90)
+    function corner(sl, w, h, u, v) {
+      var x = sl.x, y = sl.y, z = sl.z, du = (u - .5) * w, dv = (v - .5) * h;
+      if (sl.face === 'floor') return [x + du, y, z + dv];
+      if (sl.face === 'ceiling') return [x + du, y, z - dv];
+      if (sl.face === 'left') return [x, y + dv, z - du];
+      return [x, y + dv, z + du];
+    }
+    cv.addEventListener('webglcontextlost', function (e) { e.preventDefault(); lost = true; }, false);
+    cv.addEventListener('webglcontextrestored', function () { lost = false; init(); if (near) render(); }, false);
+    init();
+    return {
+      build: function (segs) {
+        var data = [], n = 0;
+        segs.forEach(function (s) {
+          s.items = s.list.map(function (it) {
+            [[0, 0], [1, 0], [1, 1], [0, 0], [1, 1], [0, 1]].forEach(function (q) {
+              var p = corner(it.sl, it.w, it.h, q[0], q[1]); data.push(p[0], p[1], p[2], q[0], q[1]);
+            });
+            var rec = { first: n, ti: it.work ? WORKS.indexOf(it.work) : -1 }; n += 6; return rec;
+          });
+        });
+        verts = new Float32Array(data); upBuf();
+        srcs.forEach(function (src, i) {
+          var im = new Image(); im.decoding = 'async';
+          im.onload = function () { upload(i); }; im.src = src; imgs[i] = im;
+        });
+      },
+      size: function (w, h, fovDeg) {
+        var dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = Math.max(1, Math.round(w * dpr)); H = Math.max(1, Math.round(h * dpr)); F = fovDeg;
+        cv.width = W; cv.height = H;
+        var f = 1 / Math.tan(F * Math.PI / 360), nr = .05, fr = 80;
+        P.fill(0); P[0] = f / (w / h); P[5] = f; P[10] = (fr + nr) / (nr - fr); P[11] = -1; P[14] = 2 * fr * nr / (nr - fr);
+      },
+      draw: function (segs, cz, fade, far) {
+        if (lost) return;
+        c.viewport(0, 0, W, H);
+        c.clear(c.COLOR_BUFFER_BIT | c.DEPTH_BUFFER_BIT);
+        c.uniformMatrix4fv(loc.P, false, P); c.uniform1f(loc.cz, cz);
+        segs.forEach(function (s) {
+          var dist = cz - s.z, k = Math.min(1, (dist - NEAR) / 1.5); // у камеры карточки уходят в темноту, как в CSS-версии
+          if (k <= 0 || dist >= far) return;
+          c.uniform1f(loc.sz, s.z); c.uniform1f(loc.a, fade(dist) * k);
+          s.items.forEach(function (it) {
+            if (it.ti >= 0 && ready[it.ti]) { c.bindTexture(c.TEXTURE_2D, tex[it.ti]); c.uniform1f(loc.use, 1); }
+            else { c.uniform1f(loc.use, 0); c.uniform3f(loc.col, it.ti < 0 ? .56 : .067, it.ti < 0 ? .114 : .067, it.ti < 0 ? .102 : .067); }
+            c.drawArrays(c.TRIANGLES, it.first, 6);
+          });
+        });
+      }
+    };
+  }
   function tick(now) {
+    if (!running) { prev = 0; looping = false; return; }
     requestAnimationFrame(tick);
-    if (!running) { prev = 0; return; }
     var d = prev ? Math.min((now - prev) / 1000, 1 / 30) : 1 / 60;
     prev = now;
     speed += (.45 - speed) * Math.min(1, d * 1.9);   // разгон от скролла плавно гаснет
@@ -1027,14 +1140,18 @@ tr.new .st{background:var(--ink);color:#fff}
     if (dy > 0 && running) speed = Math.min(window.innerWidth > 900 ? 6.5 : 3.2, speed + dy * (window.innerWidth > 900 ? .09 : .028));
   }, { passive: true });
   // Пока туннель далеко от экрана, его просто нет: ни слоёв, ни текстур
-  world.style.display = 'none';
+  if (!gl) world.style.display = 'none';
   new IntersectionObserver(function (en) {
     near = en[0].isIntersecting;
-    world.style.display = near ? '' : 'none';
+    if (!gl) world.style.display = near ? '' : 'none';
     if (near) { tunResize(); tunProgress(); render(); }
   }, { rootMargin: '60% 0px 60% 0px' }).observe(tun);
-  new IntersectionObserver(function (en) { running = en[0].isIntersecting && !still; }, { threshold: 0 }).observe(tun);
-  requestAnimationFrame(tick);
+  // Цикл кадров крутится только пока туннель на экране
+  var looping = false;
+  new IntersectionObserver(function (en) {
+    running = en[0].isIntersecting && !still;
+    if (running && !looping) { looping = true; requestAnimationFrame(tick); }
+  }, { threshold: 0 }).observe(tun);
 
   /* ===== Идея 03: калькулятор подписок ===== */
   // Условные цены в месяц. product: собирается агентом и требует хостинга (170 ₽ за проект)
